@@ -30,6 +30,10 @@ AVAILABLE_LLMS = [
     "o1-mini-2024-09-12",
     "o3-mini",
     "o3-mini-2025-01-31",
+    # Azure OpenAI models
+    "azure/gpt-4o",
+    "azure/gpt-4o-mini",
+    "azure/gpt-4",
     # DeepSeek Models
     "deepseek-coder-v2-0724",
     "deepcoder-14b",
@@ -51,6 +55,19 @@ AVAILABLE_LLMS = [
     "gemini-2.0-flash",
     "gemini-2.5-flash-preview-04-17",
     "gemini-2.5-pro-preview-03-25",
+    # Ollama local models
+    "ollama/llama3.1",
+    "ollama/llama3.1:8b",
+    "ollama/llama3.1:70b",
+    "ollama/codellama",
+    "ollama/codellama:7b",
+    "ollama/codellama:13b",
+    "ollama/codellama:34b",
+    "ollama/qwen2.5-coder",
+    "ollama/qwen2.5-coder:7b",
+    "ollama/deepseek-coder-v2",
+    "ollama/mistral-nemo",
+    "ollama/phi3.5",
 ]
 
 
@@ -135,6 +152,43 @@ def get_batch_responses_from_llm(
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
         response = client.chat.completions.create(
             model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=MAX_NUM_TOKENS,
+            n=n_responses,
+            stop=None,
+        )
+        content = [r.message.content for r in response.choices]
+        new_msg_history = [
+            new_msg_history + [{"role": "assistant", "content": c}] for c in content
+        ]
+    elif model.startswith("azure/"):
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        azure_model = model.split("/")[-1]
+        response = client.chat.completions.create(
+            model=azure_model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=MAX_NUM_TOKENS,
+            n=n_responses,
+            stop=None,
+            seed=0,
+        )
+        content = [r.message.content for r in response.choices]
+        new_msg_history = [
+            new_msg_history + [{"role": "assistant", "content": c}] for c in content
+        ]
+    elif model.startswith("ollama/"):
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        ollama_model = model.split("/")[-1]
+        response = client.chat.completions.create(
+            model=ollama_model,
             messages=[
                 {"role": "system", "content": system_message},
                 *new_msg_history,
@@ -371,6 +425,37 @@ def get_response_from_llm(
         )
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
+    elif model.startswith("azure/"):
+        azure_model = model.split("/")[-1]
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        response = client.chat.completions.create(
+            model=azure_model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=MAX_NUM_TOKENS,
+            n=1,
+            seed=0,
+        )
+        content = response.choices[0].message.content
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
+    elif model.startswith("ollama/"):
+        ollama_model = model.split("/")[-1]
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        response = client.chat.completions.create(
+            model=ollama_model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=MAX_NUM_TOKENS,
+            n=1,
+        )
+        content = response.choices[0].message.content
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     else:
         raise ValueError(f"Model {model} not supported.")
 
@@ -432,6 +517,32 @@ def create_client(model) -> tuple[Any, str]:
     elif "o1" in model or "o3" in model:
         print(f"Using OpenAI API with model {model}.")
         return openai.OpenAI(), model
+    elif model.startswith("azure/"):
+        azure_model = model.split("/")[-1]
+        print(f"Using Azure OpenAI with model {azure_model}.")
+        if "AZURE_OPENAI_API_KEY" not in os.environ:
+            raise ValueError("AZURE_OPENAI_API_KEY environment variable not set")
+        if "AZURE_OPENAI_ENDPOINT" not in os.environ:
+            raise ValueError("AZURE_OPENAI_ENDPOINT environment variable not set")
+        return (
+            openai.AzureOpenAI(
+                api_key=os.environ["AZURE_OPENAI_API_KEY"],
+                api_version="2024-02-01",
+                azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+            ),
+            azure_model,
+        )
+    elif model.startswith("ollama/"):
+        ollama_model = model.split("/")[-1]
+        print(f"Using Ollama with model {ollama_model}.")
+        ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        return (
+            openai.OpenAI(
+                api_key="ollama",  # Ollama doesn't require a real API key
+                base_url=ollama_base_url,
+            ),
+            ollama_model,
+        )
     elif model == "deepseek-coder-v2-0724":
         print(f"Using OpenAI API with {model}.")
         return (

@@ -60,13 +60,67 @@ pip install -r requirements.txt
 
 ### Supported Models and API Keys
 
-#### OpenAI Models
+The AI-Scientist-v2 now supports **49 language models** and **13 vision-language models** across multiple providers for maximum flexibility and reliability.
+
+#### OpenAI Models (19 models)
 
 By default, the system uses the `OPENAI_API_KEY` environment variable for OpenAI models.
 
-#### Gemini Models
+#### Azure OpenAI (Enterprise Support)
+
+For enterprise users, Azure OpenAI is supported with these environment variables:
+```bash
+export AZURE_OPENAI_API_KEY="your-azure-key"
+export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
+```
+
+#### Anthropic Claude Models
+
+Direct API and multiple deployment options supported:
+- **Direct API**: Uses `ANTHROPIC_API_KEY`
+- **AWS Bedrock**: Configure AWS credentials
+- **Google Vertex AI**: Configure Google Cloud credentials
+
+#### Google Gemini Models
 
 By default, the system uses the `GEMINI_API_KEY` environment variable for Gemini models through OpenAI API.
+
+#### Ollama (Local AI Models)
+
+Run AI models locally with Ollama support. Install and setup:
+```bash
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Pull models
+ollama pull llama3.1:8b
+ollama pull codellama:7b
+ollama pull deepseek-coder-v2
+
+# Start server
+ollama serve
+```
+
+Set `OLLAMA_BASE_URL` environment variable if using a different endpoint (defaults to `http://localhost:11434/v1`).
+
+#### DeepSeek and HuggingFace Models
+
+- **DeepSeek**: Uses `DEEPSEEK_API_KEY`
+- **HuggingFace**: Uses `HUGGINGFACE_API_KEY`
+
+#### Enhanced Vision Capabilities
+
+The system now supports **13 vision-language models** across multiple providers:
+- **OpenAI**: GPT-4o variants, o3-mini
+- **Anthropic**: Claude 3 and 3.5 models with vision
+- **Google**: Gemini vision models
+
+#### Automatic Model Fallback
+
+The enhanced system includes automatic fallback mechanisms:
+- Task-specific model prioritization (coding, reasoning, vision, etc.)
+- Automatic retry with alternative models if primary model fails  
+- Cost-aware model selection options
 
 #### Claude Models via AWS Bedrock
 
@@ -90,6 +144,83 @@ export S2_API_KEY="YOUR_S2_KEY_HERE"
 # export AWS_ACCESS_KEY_ID="YOUR_AWS_ACCESS_KEY_ID"
 # export AWS_SECRET_ACCESS_KEY="YOUR_AWS_SECRET_KEY"
 # export AWS_REGION_NAME="your-aws-region"
+```
+
+## Enhanced AI Model Support
+
+AI-Scientist-v2 has been significantly enhanced to utilize various AI models more effectively:
+
+### 🤖 Massive Model Support
+- **49 language models** across 7+ providers
+- **13 vision-language models** for multimodal analysis
+- Support for local models via Ollama
+- Enterprise-grade Azure OpenAI integration
+
+### 🔄 Intelligent Model Fallback
+- Automatic fallback between models for reliability
+- Task-specific model prioritization (coding, reasoning, vision)
+- Failed model tracking and avoidance
+- Cost-aware model selection
+
+### 🎯 Unified AI Interface
+- High-level task-specific functions
+- Consistent API across all providers
+- Built-in error handling and retry logic
+- Easy model switching and comparison
+
+### 📊 Example Usage
+
+```python
+from ai_scientist.ai_interface import TaskSpecificAI
+
+# Initialize with automatic fallback
+ai = TaskSpecificAI()
+
+# Generate code with model fallback
+code_response = ai.generate_code(
+    "Create a neural network for image classification",
+    language="python",
+    model="claude-3-5-sonnet-20241022"  # Falls back if unavailable
+)
+
+# Analyze research with vision models  
+analysis = ai.analyze_images(
+    ["research_chart.png", "results_graph.jpg"],
+    "What are the key findings in these research results?",
+    model="gpt-4o-2024-11-20"
+)
+
+# Brainstorm ideas with creativity
+ideas = ai.brainstorm_ideas(
+    "Novel approaches to automated scientific discovery", 
+    num_ideas=10
+)
+```
+
+### 🛠️ Quick Setup for Different Providers
+
+```bash
+# OpenAI
+export OPENAI_API_KEY="your-key"
+
+# Anthropic 
+export ANTHROPIC_API_KEY="your-key"
+
+# Azure OpenAI (Enterprise)
+export AZURE_OPENAI_API_KEY="your-key"
+export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
+
+# Local AI with Ollama
+ollama pull llama3.1:8b
+export OLLAMA_BASE_URL="http://localhost:11434/v1"  # optional
+
+# Google Gemini
+export GEMINI_API_KEY="your-key"
+```
+
+For a complete demonstration of the enhanced AI capabilities, run:
+```bash
+python examples/enhanced_ai_demo.py
 ```
 
 ## Generate Research Ideas

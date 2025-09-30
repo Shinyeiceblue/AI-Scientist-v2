@@ -4,6 +4,7 @@ import re
 import json
 import backoff
 import openai
+import anthropic
 from PIL import Image
 from ai_scientist.utils.token_tracker import track_token_usage
 
@@ -15,6 +16,16 @@ AVAILABLE_VLMS = [
     "gpt-4o-2024-11-20",
     "gpt-4o-mini-2024-07-18",
     "o3-mini",
+    # Claude vision models
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-sonnet-20240620",
+    "claude-3-opus-20240229",
+    "claude-3-sonnet-20240229",
+    "claude-3-haiku-20240307",
+    # Gemini vision models
+    "gemini-2.0-flash",
+    "gemini-2.5-flash-preview-04-17",
+    "gemini-2.5-pro-preview-03-25",
 ]
 
 
@@ -90,6 +101,7 @@ def prepare_vlm_prompt(msg, image_paths, max_images):
     (
         openai.RateLimitError,
         openai.APITimeoutError,
+        anthropic.RateLimitError,
     ),
 )
 def get_response_from_vlm(
@@ -107,7 +119,7 @@ def get_response_from_vlm(
     if msg_history is None:
         msg_history = []
 
-    if model in AVAILABLE_VLMS:
+    if model in ["gpt-4o-2024-05-13", "gpt-4o-2024-08-06", "gpt-4o-2024-11-20", "gpt-4o-mini-2024-07-18", "o3-mini"]:
         # Convert single image path to list for consistent handling
         if isinstance(image_paths, str):
             image_paths = [image_paths]
@@ -140,6 +152,83 @@ def get_response_from_vlm(
 
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
+    elif model.startswith("claude-"):
+        # Convert single image path to list for consistent handling
+        if isinstance(image_paths, str):
+            image_paths = [image_paths]
+
+        # Create content list starting with the text message
+        content = [{"type": "text", "text": msg}]
+
+        # Add each image to the content list (Claude format)
+        for image_path in image_paths[:max_images]:
+            base64_image = encode_image_to_base64(image_path)
+            content.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": base64_image,
+                    },
+                }
+            )
+
+        # Construct message for Claude
+        new_msg_history = msg_history + [{"role": "user", "content": content}]
+        
+        # Claude API call
+        import anthropic
+        response = client.messages.create(
+            model=model,
+            max_tokens=MAX_NUM_TOKENS,
+            temperature=temperature,
+            system=system_message,
+            messages=new_msg_history,
+        )
+        
+        content = response.content[0].text
+        new_msg_history = new_msg_history + [
+            {
+                "role": "assistant", 
+                "content": [{"type": "text", "text": content}]
+            }
+        ]
+    elif model.startswith("gemini-"):
+        # Convert single image path to list for consistent handling
+        if isinstance(image_paths, str):
+            image_paths = [image_paths]
+
+        # Create content list starting with the text message
+        content = [{"type": "text", "text": msg}]
+
+        # Add each image to the content list
+        for image_path in image_paths[:max_images]:
+            base64_image = encode_image_to_base64(image_path)
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}",
+                        "detail": "low",
+                    },
+                }
+            )
+        # Construct message with all images
+        new_msg_history = msg_history + [{"role": "user", "content": content}]
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=MAX_NUM_TOKENS,
+        )
+
+        content = response.choices[0].message.content
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     else:
         raise ValueError(f"Model {model} not supported.")
 
@@ -166,6 +255,20 @@ def create_client(model: str) -> tuple[Any, str]:
     ]:
         print(f"Using OpenAI API with model {model}.")
         return openai.OpenAI(), model
+    elif model.startswith("claude-"):
+        print(f"Using Anthropic API with model {model}.")
+        import anthropic
+        return anthropic.Anthropic(), model
+    elif model.startswith("gemini-"):
+        print(f"Using Gemini API with model {model}.")
+        import os
+        return (
+            openai.OpenAI(
+                api_key=os.environ["GEMINI_API_KEY"],
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            ),
+            model,
+        )
     else:
         raise ValueError(f"Model {model} not supported.")
 
@@ -203,6 +306,7 @@ def extract_json_between_markers(llm_output: str) -> dict | None:
     (
         openai.RateLimitError,
         openai.APITimeoutError,
+        anthropic.RateLimitError,
     ),
 )
 def get_batch_responses_from_vlm(
@@ -222,13 +326,14 @@ def get_batch_responses_from_vlm(
     Args:
         msg: Text message to send
         image_paths: Path(s) to image file(s)
-        client: OpenAI client instance
+        client: OpenAI or Anthropic client instance
         model: Name of model to use
         system_message: System prompt
         print_debug: Whether to print debug info
         msg_history: Previous message history
         temperature: Sampling temperature
         n_responses: Number of responses to generate
+        max_images: Maximum number of images to include
 
     Returns:
         Tuple of (list of response strings, list of message histories)
@@ -275,6 +380,57 @@ def get_batch_responses_from_vlm(
             max_tokens=MAX_NUM_TOKENS,
             n=n_responses,
             seed=0,
+        )
+
+        # Extract content from all responses
+        contents = [r.message.content for r in response.choices]
+        new_msg_histories = [
+            new_msg_history + [{"role": "assistant", "content": c}] for c in contents
+        ]
+    elif model.startswith("claude-"):
+        # Claude doesn't support multiple responses in one call, so we make multiple calls
+        contents = []
+        new_msg_histories = []
+        
+        for _ in range(n_responses):
+            content_single, history_single = get_response_from_vlm(
+                msg, image_paths, client, model, system_message, 
+                print_debug=False, msg_history=msg_history, temperature=temperature, max_images=max_images
+            )
+            contents.append(content_single)
+            new_msg_histories.append(history_single)
+    elif model.startswith("gemini-"):
+        # Convert single image path to list
+        if isinstance(image_paths, str):
+            image_paths = [image_paths]
+
+        # Create content list with text and images
+        content = [{"type": "text", "text": msg}]
+        for image_path in image_paths[:max_images]:
+            base64_image = encode_image_to_base64(image_path)
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}",
+                        "detail": "low",
+                    },
+                }
+            )
+
+        # Construct message with all images
+        new_msg_history = msg_history + [{"role": "user", "content": content}]
+
+        # Get multiple responses
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=MAX_NUM_TOKENS,
+            n=n_responses,
         )
 
         # Extract content from all responses
