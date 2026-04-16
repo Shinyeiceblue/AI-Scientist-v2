@@ -25,10 +25,53 @@ from .utils.config import load_task_desc, prep_agent_workspace, save_run, load_c
 from .agent_manager import AgentManager
 from pathlib import Path
 from .agent_manager import Stage
-from .log_summarization import overall_summarize
 
 
 logger = logging.getLogger("ai-scientist")
+
+
+def create_exec_callback(status_obj):
+    """Create an execution callback that only handles UI status updates."""
+
+    def exec_callback(*args, **kwargs):
+        status_obj.update("[magenta]Executing code...")
+        status_obj.update("[green]Generating code...")
+        _ = args, kwargs
+
+    return exec_callback
+
+
+def _smoke_test_manager_run_exec_callback_no_nameerror():
+    """Minimal smoke scenario for manager.run(exec_callback=...) path.
+
+    Uses mock manager/agent/status to ensure callback invocation no longer
+    relies on a free `interpreter` symbol and therefore does not raise NameError.
+    """
+
+    class MockStatus:
+        def __init__(self):
+            self.messages = []
+
+        def update(self, message):
+            self.messages.append(message)
+
+    class MockAgent:
+        def step(self, exec_callback):
+            return exec_callback("print('smoke')", True)
+
+    class MockManager:
+        def run(self, exec_callback, step_callback=None):
+            _ = step_callback
+            agent = MockAgent()
+            return agent.step(exec_callback)
+
+    status = MockStatus()
+    manager = MockManager()
+    callback = create_exec_callback(status)
+    manager.run(exec_callback=callback)
+
+    assert "[magenta]Executing code..." in status.messages
+    assert "[green]Generating code..." in status.messages
 
 
 def journal_to_rich_tree(journal: Journal):
@@ -90,15 +133,6 @@ def perform_experiments_bfts(config_path: str):
     )
     status = Status("[green]Running experiments...")
     prog.add_task("Progress:", total=cfg.agent.steps, completed=global_step)
-
-    def create_exec_callback(status_obj):
-        def exec_callback(*args, **kwargs):
-            status_obj.update("[magenta]Executing code...")
-            res = interpreter.run(*args, **kwargs)
-            status_obj.update("[green]Generating code...")
-            return res
-
-        return exec_callback
 
     def step_callback(stage, journal):
         print("Step complete")
@@ -211,6 +245,8 @@ def perform_experiments_bfts(config_path: str):
             logger.error(f"Failed to save manager journals: {e}")
 
     if cfg.generate_report:
+        from .log_summarization import overall_summarize
+
         print("Generating final report from all stages...")
         (
             draft_summary,
